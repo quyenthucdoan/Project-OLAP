@@ -1,0 +1,235 @@
+﻿--1. Thống kê số lượng người xem hết bộ Anime đó theo bộ Anime
+SELECT {[Measures].[Fact Count]} ON 0,
+{[Dim Anime].[Anime Id].CHILDREN} ON 1
+FROM [My Anime List DW1]
+WHERE [Fact].[My Status].&[2];
+
+--2. Thống kê các số lượng bộ Anime, người dùng tên 'bakajet' 
+--với tình trạng (đã xem | đã dừng | đã hủy | dự định xem),
+--số lượng tập của bộ Anime dó và số điểm người này đánh giá bộ phim 
+--theo thời gian từ năm 2010 đến năm 2015
+SELECT {[Measures].[My Watched Episodes],[Measures].[My Score]} ON 0,
+NON EMPTY{
+	[My Finish Date].[Calendar].[Year G].MEMBERS*
+	[Dim Anime].[Anime Id].CHILDREN*
+	[Fact].[My Status].CHILDREN
+} ON 1
+FROM [My Anime List DW1]
+WHERE ([Dim User].[Username].&[bakajet], 
+[My Finish Date].[Year G].&[2010]:
+[My Finish Date].[Year G].&[2015]);
+
+
+--3. Số lần đăng nhập vào trang web của người dùng 
+--3 quý trước quý 3 năm 2017 và tổng 3 lần đăng nhập
+WITH 
+MEMBER [Dim Time].[Calendar].[FRIST3QUARTER2017] AS
+	AGGREGATE(
+		LASTPERIODS(
+		3,
+		[Dim Time].[Calendar].[Quarter G].&[3]&[2017])
+	)
+SELECT { 
+	LASTPERIODS(
+		3,
+		[Dim Time].[Calendar].[Quarter G].&[3]&[2017]
+	), [Dim Time].[Calendar].[FRIST3QUARTER2017]
+} ON 0,
+NON EMPTY {[Dim User].[Username].CHILDREN} ON 1
+FROM [My Anime List DW1]
+WHERE [Measures].[Fact Count];
+
+--4. Thống kê 5 thể loại được xem nhiều nhất 
+SELECT {[Measures].[Fact Count]} ON 0,
+{
+	TOPCOUNT(
+		[Dim Genre].[Genre Id].CHILDREN,
+		5,
+		[Measures].[Fact Count])
+} ON 1
+FROM [My Anime List DW1];
+
+--5. Liệt kê 3 người có lượt truy cập nhiều nhất theo từng năm, in ra tổng số lượng tập 
+--đã xem trong năm đó, số lượng tập của bộ đó.  
+SELECT {[Measures].[Fact Count],
+[Measures].[Maximum My Watched Episodes],
+[Measures].[My Watched Episodes]} ON 0,
+NON EMPTY {
+	GENERATE(
+		[Dim Time].[Calendar].[Year G].MEMBERS,
+		TOPCOUNT(
+			[Dim Time].[Year G].CURRENTMEMBER*
+			[Dim User].[Username].CHILDREN,
+			3,
+			[Measures].[Fact Count]
+		)	
+	)
+} ON 1
+FROM [My Anime List DW1];
+
+
+--6. Lấy 5 bộ phim được xem nhiều thứ 3(bắt đầu từ vị trí thứ 3) 
+SELECT {[Measures].[Fact Count]} ON 0,
+{
+SUBSET(
+	ORDER(
+		[Dim Anime].[Anime Id].CHILDREN,
+		[Measures].[Fact Count],
+		DESC
+	),
+	3,
+	5
+)
+} ON 1
+FROM [My Anime List DW1];
+
+--7.In ra những người dùng là nữ và có điểm chấm trung bình là trên 7
+SELECT {[Measures].[My score Average]} ON 0,
+{ORDER(
+	FILTER(
+		EXISTS(
+			[Dim User].[Username].MEMBERS,
+			[Dim User].[Gender].&[Female]
+			),
+		[Measures].[My score Average] > 7
+	),
+	[Measures].[My score Average],
+	DESC
+)
+} ON 1
+FROM [My Anime List DW1];
+
+--8. So sánh các bộ Anime công chiếu vào mùa đông năm 2017 với mùa đông 3 năm trước về
+--điểm số trung bình, số lượng người xem, điểm cao nhất được chấm
+SELECT {[Measures].[My score Average],
+		[Measures].[Fact Count],
+		[Measures].[Maximum My Score]} ON 0,
+{	
+	[Dim Premiered].[Hierarchy].[Season].&[Winter]&[2017],
+	PARALLELPERIOD(
+		[Dim Premiered].[Hierarchy].[Year G],
+		3,
+		[Dim Premiered].[Hierarchy].[Season].&[Winter]&[2017]
+	)
+} ON 1
+FROM [My Anime List DW1];
+--CACH 2: PIVOL
+SELECT  
+CROSSJOIN(
+	{[Measures].[My score Average],
+		[Measures].[Fact Count],
+		[Measures].[Maximum My Score]},
+	{[Dim Premiered].[Hierarchy].[Season].&[Winter]&[2017],
+	PARALLELPERIOD(
+		[Dim Premiered].[Hierarchy].[Year G],
+		3,
+		[Dim Premiered].[Hierarchy].[Season].&[Winter]&[2017]
+	)}
+)
+ON 0
+FROM  [My Anime List DW1];
+
+
+--9. So sánh số lượng phim so với năm trước tăng/giảm bao nhiêu bộ, 
+--bao nhiêu lượng truy cập từ năm 2011 dến năm 2018
+WITH MEMBER Measures.CompareAccess AS
+([Measures].[Fact Count]) -
+([Measures].[Fact Count],
+[Dim Premiered].[Year G].CURRENTMEMBER.PREVMEMBER)
+MEMBER Measures.CompareAmout AS
+([Measures].[Dim Anime Count]) -
+([Measures].[Dim Anime Count],
+[Dim Premiered].[Year G].CURRENTMEMBER.PREVMEMBER)
+
+SELECT  {[Measures].[Dim Anime Count], Measures.CompareAmout,
+		[Measures].[Fact Count],Measures.CompareAccess} ON 0,
+
+{[Dim Premiered].[Hierarchy].[Year G].&[2011]:
+[Dim Premiered].[Hierarchy].[Year G].&[2018]} ON 1
+FROM [My Anime List DW1];
+
+--10 Liệt kê các bộ phim trong tên có chữ "One Piece" và điểm số của chúng
+SELECT {[Measures].[My score Average]} ON 0,
+{
+	FILTER(
+		ORDER(
+			[Dim Anime].[Anime Id].MEMBERS,
+			[Measures].[My score Average],
+			DESC
+		),
+		INSTR([Dim Anime].[Anime Id].CURRENTMEMBER.NAME, "One Piece")>0
+	)
+} ON 1
+FROM [My Anime List DW1]
+
+
+--11. Hiển thị các điểm số và lượt xem của các bộ anime có tên là "Naruto" và là "Movie"
+SELECT {[Measures].[My score Average], [Measures].[Fact Count]} ON 0,
+INTERSECT(
+	FILTER(
+		[Dim Anime].[Anime Id].MEMBERS,
+		INSTR([Dim Anime].[Anime Id].CURRENTMEMBER.NAME, "Naruto")>0
+	),
+	FILTER(
+		[Dim Anime].[Anime Id].MEMBERS,
+		INSTR([Dim Anime].[Anime Id].CURRENTMEMBER.NAME, "Movie")>0
+	)
+) ON 1
+FROM [My Anime List DW1];
+
+--12. Hiển thị 1 bộ phim có số phim có ít người xem nhất, chỉ tính những bộ phim đã có người xem
+--và xem điểm số trung bình của bộ phim đó
+SELECT {[Measures].[Fact Count],[Measures].[My score Average]} ON  0,
+TAIL(
+	FILTER(
+		[Dim Anime].[Anime Id].MEMBERS, 
+		NOT ISEMPTY ([Measures].[Fact Count])
+	)
+)ON 1
+FROM [My Anime List DW1];
+
+-- 13. Thống kê top 5 năm ra mắt nhiều phim phim thuộc thể loại Action và thế loại Mystery 
+--nhiều nhất và sắp sếp theo thứ tự từ lớn đến bé
+SELECT {[Dim Genre].[Genre Id].&[1],[Dim Genre].[Genre Id].&[2]} ON 0,
+HEAD(
+	ORDER(
+		DESCENDANTS([Dim Premiered].[Hierarchy].[All],1),
+		[Measures].[Dim Anime Genre Count],
+		DESC
+		),5
+)
+ON 1
+FROM [My Anime List DW1]
+WHERE [Measures].[Dim Anime Genre Count];
+
+--14. Các năm có nhiều người dùng đăng kí nhất, giúp tạo ra thêm 20% 
+--số lượng người đăng kí tài khoản ở website và thống kế số lượng theo giới tính
+SELECT {[Dim User].[Gender].&[Female],[Dim User].[Gender].&[Male]}ON 0,
+TOPPERCENT(
+	[Dim User - Join Date].[Year G].CHILDREN,
+	20,
+	[Measures].[Username Count]
+)
+ON 1
+FROM [My Anime List DW1]
+WHERE [Measures].[Username Count];
+
+
+--15. In ra các bộ phim theo thuộc thể loại Sci-Fi nhưng không thuộc thể loại Drama và Romance
+--và điểm số của chúng
+SELECT [Measures].[My score Average]ON 0,
+EXCEPT(
+	FILTER(
+		[Dim Anime].[Anime Id].MEMBERS,
+		[Dim Genre].[Genre Id].&[7]),
+	UNION(
+		FILTER(
+			[Dim Anime].[Anime Id].MEMBERS,
+			[Dim Genre].[Genre Id].&[4]),
+		FILTER(
+			[Dim Anime].[Anime Id].MEMBERS,
+			[Dim Genre].[Genre Id].&[8])
+	)
+)ON 1
+FROM [My Anime List DW1]
+
